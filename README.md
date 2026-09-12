@@ -127,34 +127,30 @@ deliberately no axios or other HTTP client, to keep the SDK bundle small.
    Body: `{ userId, prompt, elementos: [...] }`
    Response: `{ viewID: string, mensagem_escrita: string, mensagem_voz_url: string, precisao: number }`
 
-**Backend contract status (verificado contra o repo `backend-sdk` em
+**Backend contract status (alinhado com o repo `backend-sdk` em
 12/09/2026):**
 
 - ~~`idPedido` gap~~ **resolvido**: o backend emite `idPedido` nas
   respostas de (1) e (2); a leitura defensiva em `src/CaneSDK.ts` continua
   valendo como fail-safe.
-- **BLOQUEADOR — shape de `elementos` divergente**: este SDK envia
-  `{ viewId: string, className, text, isSecure, isInteractive, x, y,
-  width, height }`, mas o backend hoje desserializa
-  `AndroidComponentDTO { viewID: Integer, className, additionalInfo }` —
-  nome (`viewId` vs `viewID`), tipo (string vs Integer) e campos
-  divergem; o pipeline de agentes receberia `viewID=null` e perderia o
-  texto capturado. Direção (doc V2, payload com
-  `"viewID": "btn_teleconsulta_entrar_sala"`): o backend evolui para o
-  shape rico com id string. Ver "Gaps conhecidos" no README do
-  `backend-sdk`.
-- **BLOQUEADOR — identidade do usuário**: `registerUser({ userId })` aqui
-  apenas repassa o hash anônimo do parceiro (conforme doc V2), mas o
-  backend exige um UUID emitido por `POST /usuario/registrar`, que este
-  SDK nunca chama. Um dos lados precisa ceder (recomendação no README do
-  backend: aceitar o id externo escopado ao tenant).
-- **Loop de follow-up**: o backend devolve `pergunta.opcoes = []` nas
-  perguntas de continuação (resposta livre), e o `QuestionSheet` daqui só
-  renderiza botões — sem entrada de texto/voz o overlay ficaria preso.
-  Alinhar: ou o backend sempre gera opções, ou este SDK ganha input livre.
-- **Timeout**: `REQUEST_TIMEOUT_MS = 10s` aqui vs. fail-safe de 2s
-  prometido no doc V2 §5.5 (latência típica declarada: 650ms P95).
-  Decidir o valor contratual e alinhar.
+- ~~Shape de `elementos` divergente~~ **resolvido no backend**: o backend
+  agora desserializa exatamente o shape que este SDK envia
+  (`CapturedElementDTO`, espelho de `CapturedElement`), e o `viewID` da
+  resposta de `achar-resposta` é o mesmo `viewId` string capturado aqui —
+  o lookup no índice local volta a funcionar.
+- ~~Identidade do usuário~~ **resolvido no backend**: `userId` (o hash
+  anônimo do parceiro que `registerUser` repassa) agora é aceito como
+  string e auto-provisionado por tenant na primeira chamada — este SDK
+  continua sem precisar chamar `POST /usuario/registrar`.
+- ~~Loop de follow-up sem opções~~ **resolvido aqui**: o `QuestionSheet`
+  renderiza um campo de texto livre + botão "Enviar resposta" quando
+  `pergunta.opcoes` vem vazio (contrato do backend para resposta aberta).
+- **Timeout** (pendente, menor): `REQUEST_TIMEOUT_MS = 10s` aqui vs.
+  fail-safe de 2s prometido no doc V2 §5.5 (latência típica declarada:
+  650ms P95). Decidir o valor contratual e alinhar.
+- As correções do backend ainda não foram compiladas (sem JDK 17 na
+  máquina de dev) — o contrato acima precisa de um teste de integração
+  real antes do primeiro piloto.
 
 ## Native view-hierarchy scanners
 
@@ -384,9 +380,10 @@ Nothing above renames, removes, or changes the signature of `init`,
   Android SDK + JDK 17 and a macOS/Xcode machine respectively.
 - On-device QA of the native scanners (coordinate accuracy, debounce
   feel, secure-field masking against real system keyboards).
-- ~~Backend team confirmation of the `idPedido` gap~~ resolved -- but see
-  the remaining blockers under "Backend contract status" above
-  (`elementos` shape, user identity, empty `opcoes`).
+- ~~Backend team confirmation of the `idPedido` gap~~ resolved -- and the
+  former blockers (`elementos` shape, user identity, empty `opcoes`) are
+  now aligned too; see "Backend contract status" above. What remains is
+  an end-to-end integration test against a running backend.
 - **Hybrid capture engine for Jetpack Compose / SwiftUI**: both scanners
   walk the raw view tree only. On a Compose screen (`ComposeView`) or a
   SwiftUI host (`UIHostingController`) that walk returns almost nothing
