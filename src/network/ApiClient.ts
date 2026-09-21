@@ -7,11 +7,6 @@ import type {
   RespostaNecessidadeResponse,
 } from '../types';
 
-/**
- * Placeholder default -- every real integration is expected to override
- * this via `CaneSDK.init({ options: { baseUrl } })`. Kept as an obvious
- * non-functional hostname rather than guessing at a real one.
- */
 export const DEFAULT_BASE_URL = 'https://api.apoiodigital.example';
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -26,12 +21,6 @@ export class CaneApiError extends Error {
   }
 }
 
-/**
- * Deliberately built on plain `fetch` -- no axios or other HTTP client, per
- * an explicit "keep the SDK bundle small" requirement from the team. Every
- * request carries `x-api-key: <accessKey>` and matches the three backend
- * endpoints exactly as specified (see README "Backend contract").
- */
 export class ApiClient {
   constructor(
     private readonly accessKey: string,
@@ -69,7 +58,6 @@ export class ApiClient {
     }
   }
 
-  /** POST /resposta/validar/necessidade-informacoes */
   validarNecessidadeInformacoes(
     body: NecessidadeInformacoesRequest
   ): Promise<NecessidadeInformacoesResponse> {
@@ -79,7 +67,6 @@ export class ApiClient {
     );
   }
 
-  /** POST /resposta/validar/resposta-necessidade */
   validarRespostaNecessidade(
     body: RespostaNecessidadeRequest
   ): Promise<RespostaNecessidadeResponse> {
@@ -89,7 +76,6 @@ export class ApiClient {
     );
   }
 
-  /** POST /resposta/achar-resposta */
   acharResposta(body: AcharRespostaRequest): Promise<AcharRespostaResponse> {
     return this.post<AcharRespostaResponse>('/resposta/achar-resposta', body);
   }

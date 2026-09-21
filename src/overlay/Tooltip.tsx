@@ -6,11 +6,6 @@ interface Props {
   placement: 'above' | 'below';
 }
 
-/**
- * Large, high-contrast speech-bubble tooltip. Typography is deliberately
- * oversized (elderly-user target audience) -- do not shrink this to fit more
- * text; truncate/wrap instead.
- */
 export function Tooltip({ message, placement }: Props): React.JSX.Element {
   return (
     <View

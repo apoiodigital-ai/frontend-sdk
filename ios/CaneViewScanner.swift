@@ -1,20 +1,6 @@
 import Foundation
 import UIKit
 
-/// In-App View Scanner (iOS).
-///
-/// Mirrors `android/.../ViewHierarchyScanner.kt`: walks the host app's OWN
-/// `UIWindow` hierarchy (never any accessibility service, never another
-/// process) and produces a flattened, privacy-scrubbed snapshot of what is
-/// currently on screen. See the SDK README's "Privacy design" section for
-/// why this only ever runs on-demand and never streams continuously.
-///
-/// IMPORTANT -- environment limitation: this file was written on a Windows
-/// machine with no Xcode/macOS toolchain available. It has NOT been
-/// compiled, run, or tested against a real UIKit runtime. It's written
-/// carefully from documented UIKit/Swift-ObjC-interop APIs, but treat it as
-/// unverified until someone builds it in Xcode. See README "What could not
-/// be built/verified in this environment."
 @objc(CaneViewScanner)
 public class CaneViewScanner: NSObject {
 
@@ -26,10 +12,6 @@ public class CaneViewScanner: NSObject {
     super.init()
   }
 
-  /// Schedules a single debounced read of the key window's view hierarchy.
-  /// `completion` is always invoked exactly once, on the main thread, and
-  /// never throws -- any internal failure resolves with an empty array so
-  /// the JS side can fail safe instead of surfacing a native crash.
   @objc public func scan(completion: @escaping ([[String: Any]]) -> Void) {
     pendingWorkItem?.cancel()
 
@@ -59,8 +41,6 @@ public class CaneViewScanner: NSObject {
           return keyWindow
         }
       }
-      // Fall back to the first available window if none is flagged "key"
-      // yet (can happen very early in app launch).
       return (scenes.first as? UIWindowScene)?.windows.first
     }
     return UIApplication.shared.keyWindow
@@ -79,8 +59,6 @@ public class CaneViewScanner: NSObject {
   }
 
   private func captureNode(view: UIView, window: UIWindow) -> [String: Any]? {
-    // Convert this view's local bounds into the window's coordinate space,
-    // per the spec: `view.convert(view.bounds, to: window)`.
     let frameInWindow = view.convert(view.bounds, to: window)
     guard frameInWindow.width > 0, frameInWindow.height > 0 else { return nil }
 
@@ -100,12 +78,6 @@ public class CaneViewScanner: NSObject {
     return node
   }
 
-  /// Priority order mirrors the Android scanner:
-  ///  1. `accessibilityIdentifier` -- this is what RN's `testID` prop maps
-  ///     to on iOS, so it's the closest thing to a stable, developer-chosen id.
-  ///  2. `accessibilityLabel` -- populated by RN's `accessibilityLabel`
-  ///     prop; commonly set anyway for real accessibility purposes.
-  ///  3. A synthetic per-instance fallback.
   private func identifier(for view: UIView) -> String {
     if let identifier = view.accessibilityIdentifier, !identifier.isEmpty {
       return identifier
@@ -116,10 +88,6 @@ public class CaneViewScanner: NSObject {
     return "view-\(ObjectIdentifier(view).hashValue)"
   }
 
-  /// Masks secure-entry fields before anything ever leaves native code.
-  /// Only `UITextField.isSecureTextEntry` is checked -- UIKit's `UITextView`
-  /// has no equivalent secure-entry concept, matching the Android side
-  /// where only `EditText` variations are checked.
   private func isSecureField(_ view: UIView) -> Bool {
     if let field = view as? UITextField {
       return field.isSecureTextEntry

@@ -17,18 +17,6 @@ interface Props {
   onAnswer: (opcao: string) => void;
 }
 
-/**
- * Renders a clarifying question from `validar/necessidade-informacoes` (or a
- * follow-up loop from `validar/resposta-necessidade`).
- *
- * Two shapes, per the backend contract:
- * - `opcoes` non-empty: closed question -- large tappable option buttons.
- * - `opcoes` empty: open question (the follow-up loop always sends `[]`, and
- *   the QuestionWriter rule mandates `[]` whenever the answer must be typed,
- *   e.g. an address) -- a large free-text field plus a confirm button.
- *   Without this branch the sheet would render zero buttons and soft-lock
- *   the overlay, which is exactly what the zero-crash policy forbids.
- */
 export function QuestionSheet({
   pergunta,
   onAnswer,

@@ -1,26 +1,5 @@
-/**
- * A tiny local mock of the ApoioDigital backend, used ONLY by this example
- * app to demonstrate the full `CaneSDK` request/response cycle without
- * needing a real server. It intercepts `fetch` calls aimed at
- * `MOCK_BASE_URL` (see `App.tsx`'s `CaneSDK.init` call) and simulates the
- * exact three-endpoint contract documented in the SDK's README, including
- * one clarifying-question round trip, so the "necessidade-informacoes ->
- * resposta-necessidade loop -> achar-resposta" flow can be exercised
- * end-to-end in this example. Every other `fetch` call is passed through to
- * the real implementation untouched.
- *
- * This file is intentionally NOT part of the published library -- it only
- * exists under `example/`.
- */
 export const MOCK_BASE_URL = 'https://mock.cane.local';
 
-/**
- * `viewID` this mock will eventually resolve to. It must match a real
- * element's `viewId` as captured by the native scanner, which (per the
- * scanner's id-resolution priority -- see README) falls back to
- * `contentDescription`/`accessibilityLabel` when no real native resource id
- * is set. `App.tsx`'s payment button sets exactly this `accessibilityLabel`.
- */
 export const DEMO_TARGET_VIEW_ID = 'cane-demo-pay-button';
 
 let pedidoCounter = 0;
@@ -52,9 +31,6 @@ export function installMockBackend(): void {
             texto: 'Você está tentando pagar um boleto ou fazer um PIX?',
             opcoes: ['Pagar boleto', 'Fazer PIX'],
           },
-          // NOTE: `idPedido` is not in the literal spec response shape for
-          // this endpoint -- the SDK reads it defensively. See the SDK
-          // README's "Backend contract gap" note.
           idPedido,
         })
       );

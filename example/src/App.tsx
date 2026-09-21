@@ -14,10 +14,6 @@ import {
   DEMO_TARGET_VIEW_ID,
 } from './mockBackend';
 
-// The mock backend is wired up before anything else in this example so
-// CaneSDK's real ApiClient (plain `fetch`, no mocking inside the library
-// itself) has something to talk to. A real partner app would simply point
-// `options.baseUrl` at their actual ApoioDigital backend deployment instead.
 installMockBackend();
 
 type Screen = 'home' | 'payment';
@@ -31,16 +27,11 @@ export default function App(): React.JSX.Element {
       options: {
         voiceGuidance: true,
         hapticFeedback: true,
-        // Shortened purely so this demo is easy to see in a couple of
-        // seconds. Production integrations should leave this as 'auto' (or
-        // pass real min/max bounds) -- see README "Inactivity heuristic".
         inactivityTimeout: { min: 5000, max: 10000 },
         baseUrl: MOCK_BASE_URL,
       },
     });
 
-    // In a real app this would be an anonymized hash the partner already
-    // has, supplied after their own login -- CaneSDK never sees real PII.
     CaneSDK.registerUser({ userId: 'demo-user-hash-000' });
 
     return () => {
@@ -87,9 +78,6 @@ function PaymentScreen({
   onGoBack: () => void;
 }): React.JSX.Element {
   useEffect(() => {
-    // Marks this screen as high-stakes: runs the local, on-device scan
-    // ONCE and arms the inactivity heuristic. See README "Inactivity
-    // heuristic" for exactly what does (and does not) happen here.
     CaneSDK.registerCriticalScreen({ name: 'payment-confirmation' });
     return () => {
       CaneSDK.unregisterCriticalScreen();
@@ -115,13 +103,6 @@ function PaymentScreen({
         <Text style={styles.value}>Farmácia Bem-Estar</Text>
       </View>
 
-      {/*
-        `accessibilityLabel` doubles as the stable identifier the native
-        scanner reports as `viewId` (see the Android/iOS scanner's id
-        priority order in the README). The example's mock backend resolves
-        its `achar-resposta` answer to this exact id, so the spotlight in a
-        real on-device run would highlight this button.
-      */}
       <TouchableOpacity
         style={styles.payButton}
         accessibilityLabel={DEMO_TARGET_VIEW_ID}

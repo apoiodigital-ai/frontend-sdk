@@ -7,12 +7,6 @@ import { QuestionSheet } from './QuestionSheet';
 import { Spotlight } from './Spotlight';
 import { SafeBoundary } from '../safety/SafeBoundary';
 
-/**
- * Everything the SDK renders lives under here, and every piece is wrapped
- * in its own `SafeBoundary` so one broken subtree (say, a malformed
- * `pergunta` from the backend) can't take the FAB or the rest of the host
- * app down with it.
- */
 export function OverlayRoot(): React.JSX.Element | null {
   const state = useSyncExternalStore(
     overlayController.subscribe,

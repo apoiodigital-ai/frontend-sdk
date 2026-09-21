@@ -14,32 +14,10 @@ import com.facebook.react.bridge.WritableArray
 import com.facebook.react.bridge.WritableMap
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * In-App View Scanner (Android).
- *
- * Walks the HOST APP'S OWN view hierarchy -- never `AccessibilityService`,
- * never anything outside this process. That's the entire point of this
- * architecture: the old prototype used `AccessibilityService` to scrape
- * arbitrary screens system-wide, which both Google Play and Apple restrict
- * to severe-disability use cases, and which has no iOS equivalent. This
- * class only ever looks at views the host Activity itself owns.
- *
- * Debounced against `ViewTreeObserver.OnGlobalLayoutListener`: we wait for
- * 300-500ms of layout quiet before reading, so we never capture mid-
- * animation/mid-layout garbage. This debounce is UNRELATED to (and much
- * shorter than) the JS-side inactivity-heuristic timer -- see
- * `InactivityHeuristic.ts` for that. This one is purely about read
- * consistency.
- */
 class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
 
   private val mainHandler = Handler(Looper.getMainLooper())
 
-  /**
-   * Runs exactly one debounced scan of [activity]'s decor view and invokes
-   * [callback] with the result exactly once, on the main thread. Never
-   * throws outward -- any internal failure resolves with an empty array.
-   */
   fun scan(activity: Activity, callback: (WritableArray) -> Unit) {
     val decorView = activity.window?.decorView
     if (decorView == null) {
@@ -67,9 +45,6 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
       try {
         walk(decorView, result)
       } catch (e: Exception) {
-        // Fail-safe: partial/garbled results are worse than none; on any
-        // walk failure we hand back whatever array we had (possibly empty)
-        // rather than throwing across the bridge.
       }
       callback(result)
     }
@@ -88,9 +63,6 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
       observer.addOnGlobalLayoutListener(globalLayoutListener)
     }
 
-    // Always schedule an initial debounce window too: if the tree is
-    // already settled, no further layout pass may ever fire, and we still
-    // need to resolve.
     mainHandler.postDelayed(runnable, debounceMs)
   }
 
@@ -129,27 +101,12 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
     return map
   }
 
-  /**
-   * Priority order for a stable-ish identifier:
-   *   1. A real Android resource id (`android:id` / `R.id.*`), if the view
-   *      has one and it resolves to a symbolic name.
-   *   2. `contentDescription` -- in React Native this is populated by the
-   *      `accessibilityLabel` prop, which app authors commonly set anyway
-   *      for real accessibility purposes. We deliberately prefer this over
-   *      a synthetic id so partner apps get a predictable, human-chosen
-   *      `viewID` they can reason about (and it's what `achar-resposta`
-   *      responses are expected to reference back).
-   *   3. A synthetic per-instance fallback, only stable within a single
-   *      scan.
-   */
   private fun resolveViewId(view: View): String {
     if (view.id != View.NO_ID) {
       try {
         val name = view.resources.getResourceEntryName(view.id)
         if (!name.isNullOrBlank()) return name
       } catch (e: Exception) {
-        // Not a resolvable resource id (common for RN-generated views) --
-        // fall through to the next strategy.
       }
     }
 
@@ -159,7 +116,6 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
     return "view-${System.identityHashCode(view)}"
   }
 
-  /** Masks password/secure-entry fields BEFORE anything leaves native code. */
   private fun isSecureField(view: View): Boolean {
     if (view !is EditText) return false
     return isPasswordVariation(view.inputType)

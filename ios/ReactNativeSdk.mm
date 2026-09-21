@@ -1,9 +1,5 @@
 #import "ReactNativeSdk.h"
 
-// Xcode auto-generates this umbrella header for the Swift files compiled
-// into the same target/pod (see ReactNativeSdk.podspec's `swift_version`).
-// NOT verified in this environment -- no Xcode/macOS available here. See
-// README "What could not be built/verified in this environment."
 #if __has_include("ReactNativeSdk-Swift.h")
 #import "ReactNativeSdk-Swift.h"
 #else
@@ -24,13 +20,6 @@ static const double kCaneViewScannerDebounceMs = 400.0;
   return self;
 }
 
-/**
- * Bridges to `captureViewHierarchy(): Promise<CapturedElementNative[]>`.
- *
- * Fail-safe contract: this NEVER rejects. Any native-side failure resolves
- * with an empty array so the JS layer degrades gracefully instead of
- * surfacing a native crash/error to the host app.
- */
 - (void)captureViewHierarchy:(RCTPromiseResolveBlock)resolve
                        reject:(RCTPromiseRejectBlock)reject
 {

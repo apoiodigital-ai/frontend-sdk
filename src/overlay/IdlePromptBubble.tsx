@@ -5,11 +5,6 @@ interface Props {
   onAnswer: (yes: boolean) => void;
 }
 
-/**
- * The proactive-by-hesitation prompt. Purely local UI at this point -- no
- * network call has happened yet (see privacy note in `InactivityHeuristic.ts`).
- * Only a "Sim" tap here causes anything to be sent to the backend.
- */
 export function IdlePromptBubble({ onAnswer }: Props): React.JSX.Element {
   return (
     <Modal

@@ -41,7 +41,6 @@ export function Spotlight({
   const hasHapticFired = useRef(false);
 
   useEffect(() => {
-    // Haptic feedback fires once, right when the cutout is revealed.
     if (hapticFeedback && !hasHapticFired.current) {
       hasHapticFired.current = true;
       try {

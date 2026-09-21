@@ -16,10 +16,6 @@ Pod::Spec.new do |s|
   s.source_files = "ios/**/*.{h,m,mm,swift,cpp}"
   s.private_header_files = "ios/**/*.h"
 
-  # Required so the Swift scanner (CaneViewScanner.swift) compiles alongside
-  # the Objective-C++ TurboModule glue (ReactNativeSdk.mm), which imports the
-  # Xcode-generated "ReactNativeSdk-Swift.h" umbrella header. NOT verified in
-  # this environment -- no Xcode/macOS available. See README.
   s.swift_version = "5.0"
   s.pod_target_xcconfig = {
     "DEFINES_MODULE" => "YES"

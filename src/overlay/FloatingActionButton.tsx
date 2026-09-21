@@ -11,11 +11,6 @@ interface Props {
   onPress: () => void;
 }
 
-/**
- * Always-available "ask for help" affordance -- the second trigger path
- * alongside the automatic inactivity heuristic. Bottom-right, thumb-reachable,
- * large hit target for the elderly-user audience.
- */
 export function FloatingActionButton({ onPress }: Props): React.JSX.Element {
   const handlePress = (): void => {
     AccessibilityInfo.announceForAccessibility?.('Abrindo ajuda do Cane');

@@ -52,9 +52,6 @@ describe('overlayController', () => {
   });
 
   it('reset() clears pending answers and hides everything', () => {
-    // Intentionally not awaited: reset() leaves any pending prompt promise
-    // unresolved (nobody is waiting on it in practice, since `destroy()`
-    // tears down the caller too) -- this only asserts reset() itself works.
     overlayController.showIdlePrompt();
     overlayController.reset();
     expect(overlayController.getState().screen.kind).toBe('hidden');
