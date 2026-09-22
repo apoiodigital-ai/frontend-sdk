@@ -43,7 +43,8 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
       cleanup()
       val result = Arguments.createArray()
       try {
-        walk(decorView, result)
+        val density = decorView.resources.displayMetrics.density
+        walk(decorView, result, density)
       } catch (e: Exception) {
       }
       callback(result)
@@ -66,19 +67,19 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
     mainHandler.postDelayed(runnable, debounceMs)
   }
 
-  private fun walk(view: View, out: WritableArray) {
+  private fun walk(view: View, out: WritableArray, density: Float) {
     if (view.visibility != View.VISIBLE) return
 
-    captureNode(view)?.let { out.pushMap(it) }
+    captureNode(view, density)?.let { out.pushMap(it) }
 
     if (view is ViewGroup) {
       for (i in 0 until view.childCount) {
-        walk(view.getChildAt(i), out)
+        walk(view.getChildAt(i), out, density)
       }
     }
   }
 
-  private fun captureNode(view: View): WritableMap? {
+  private fun captureNode(view: View, density: Float): WritableMap? {
     val width = view.width
     val height = view.height
     if (width <= 0 || height <= 0) return null
@@ -91,14 +92,19 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
     val map = Arguments.createMap()
     map.putString("viewId", resolveViewId(view))
     map.putString("className", view.javaClass.simpleName)
-    map.putDouble("x", locationOnScreen[0].toDouble())
-    map.putDouble("y", locationOnScreen[1].toDouble())
-    map.putDouble("width", width.toDouble())
-    map.putDouble("height", height.toDouble())
+    map.putDouble("x", pxToDp(locationOnScreen[0], density))
+    map.putDouble("y", pxToDp(locationOnScreen[1], density))
+    map.putDouble("width", pxToDp(width, density))
+    map.putDouble("height", pxToDp(height, density))
     map.putBoolean("isSecure", isSecure)
     map.putBoolean("isInteractive", isInteractive(view))
     map.putString("text", if (isSecure) "" else extractText(view))
     return map
+  }
+
+  private fun pxToDp(px: Int, density: Float): Double {
+    if (density <= 0f) return px.toDouble()
+    return px / density.toDouble()
   }
 
   private fun resolveViewId(view: View): String {
