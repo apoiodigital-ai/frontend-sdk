@@ -108,6 +108,7 @@ describe('CaneSDK assist flow', () => {
         mensagem_escrita: 'Toque em Pagar boleto',
         mensagem_voz_url: null,
         precisao: 0.9,
+        idResposta: 'resposta-1',
       },
     };
 
@@ -129,6 +130,11 @@ describe('CaneSDK assist flow', () => {
       call.url.endsWith('/resposta/achar-resposta')
     );
     expect(findCall?.body.idPedido).toBe('pedido-1');
+
+    const screen = overlayController.getState().screen;
+    expect(screen.kind === 'spotlight' && screen.answer.idResposta).toBe(
+      'resposta-1'
+    );
   });
 
   it('hides the loading overlay and stays usable when the network fails', async () => {

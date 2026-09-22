@@ -82,4 +82,5 @@ export interface AcharRespostaResponse {
   mensagem_escrita: string;
   mensagem_voz_url: string | null;
   precisao: number;
+  idResposta?: string;
 }
