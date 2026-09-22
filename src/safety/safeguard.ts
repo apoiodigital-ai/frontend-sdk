@@ -8,7 +8,7 @@ export async function safeAsync<T>(
   try {
     return await operation();
   } catch (error) {
-    logger.warn(
+    logger.error(
       `Swallowed error in "${context}" -- SDK hiding itself for this operation.`,
       error
     );
@@ -24,7 +24,7 @@ export function safeSync<T>(
   try {
     return operation();
   } catch (error) {
-    logger.warn(
+    logger.error(
       `Swallowed error in "${context}" -- SDK hiding itself for this operation.`,
       error
     );

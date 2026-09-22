@@ -2,6 +2,10 @@ export { CaneSDK } from './CaneSDK';
 export { CaneSDKHost } from './CaneSDKHost';
 
 export type {
+  CaneLogEntry,
+  CaneLogErrorSummary,
+  CaneLogHandler,
+  CaneLogLevel,
   CaneSDKInitConfig,
   CaneSDKOptions,
   CapturedElement,

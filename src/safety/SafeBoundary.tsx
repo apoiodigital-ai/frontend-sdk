@@ -17,7 +17,7 @@ export class SafeBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: unknown): void {
-    logger.warn(
+    logger.error(
       'Overlay render error -- hiding CaneSDK overlay for this session.',
       error
     );

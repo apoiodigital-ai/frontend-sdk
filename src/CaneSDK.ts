@@ -52,6 +52,11 @@ class CaneSDKFacade {
 
   init(config: CaneSDKInitConfig): void {
     safeSync(() => {
+      logger.configure({
+        level: config?.options?.logLevel,
+        handler: config?.options?.onLog,
+      });
+
       if (!config?.accessKey) {
         throw new Error('CaneSDK.init requires an accessKey.');
       }
@@ -138,6 +143,7 @@ class CaneSDKFacade {
       this.criticalScreenName = null;
       this.lastScan = null;
       this.elementIndex.clear();
+      logger.configure({});
     }, 'CaneSDK.destroy');
   }
 

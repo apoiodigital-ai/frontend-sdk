@@ -15,12 +15,32 @@ export interface InactivityTimeoutBounds {
   max: number;
 }
 
+export type CaneLogLevel = 'debug' | 'info' | 'warn' | 'error' | 'silent';
+
+export interface CaneLogErrorSummary {
+  name: string;
+  message: string;
+  status?: number;
+  kind?: string;
+}
+
+export interface CaneLogEntry {
+  level: Exclude<CaneLogLevel, 'silent'>;
+  message: string;
+  timestamp: number;
+  error?: CaneLogErrorSummary;
+}
+
+export type CaneLogHandler = (entry: CaneLogEntry) => void;
+
 export interface CaneSDKOptions {
   voiceGuidance?: boolean;
   hapticFeedback?: boolean;
   inactivityTimeout?: 'auto' | InactivityTimeoutBounds;
   baseUrl?: string;
   heuristicConstants?: Partial<HeuristicConstants>;
+  logLevel?: CaneLogLevel;
+  onLog?: CaneLogHandler;
 }
 
 export interface CaneSDKInitConfig {

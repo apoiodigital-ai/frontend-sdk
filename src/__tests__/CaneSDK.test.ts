@@ -6,7 +6,7 @@ import {
   it,
   jest,
 } from '@jest/globals';
-import type { CapturedElement } from '../types';
+import type { CaneLogEntry, CapturedElement } from '../types';
 import { CaneSDK } from '../CaneSDK';
 import { overlayController } from '../overlay/controller';
 
@@ -154,6 +154,31 @@ describe('CaneSDK assist flow', () => {
     };
     overlayController.triggerManualAssist();
     await waitFor(() => screenKind() === 'question');
+  });
+
+  it('reports assist failures to the partner onLog handler', async () => {
+    const entries: CaneLogEntry[] = [];
+    CaneSDK.init({
+      accessKey: 'chave-teste',
+      options: {
+        baseUrl: 'https://cane.test',
+        voiceGuidance: false,
+        hapticFeedback: false,
+        logLevel: 'warn',
+        onLog: (entry) => {
+          entries.push(entry);
+        },
+      },
+    });
+    CaneSDK.registerUser({ userId: 'usr_anon_teste' });
+    networkDown = true;
+
+    overlayController.triggerManualAssist();
+    await waitFor(() => entries.length > 0);
+
+    expect(entries[0]?.level).toBe('warn');
+    expect(entries[0]?.error?.kind).toBe('network');
+    expect(JSON.stringify(entries)).not.toContain('chave-teste');
   });
 
   it('lets the user close the question without locking the SDK', async () => {
