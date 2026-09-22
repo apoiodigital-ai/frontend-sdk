@@ -74,6 +74,7 @@ export interface AcharRespostaRequest {
   userId: string;
   prompt: string;
   elementos: CapturedElement[];
+  idPedido?: string;
 }
 
 export interface AcharRespostaResponse {

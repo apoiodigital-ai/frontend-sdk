@@ -227,6 +227,7 @@ class CaneSDKFacade {
         userId: this.userId,
         prompt: promptText,
         elementos: elements,
+        idPedido,
       });
 
       const bounds = this.elementIndex.get(found.viewID);
