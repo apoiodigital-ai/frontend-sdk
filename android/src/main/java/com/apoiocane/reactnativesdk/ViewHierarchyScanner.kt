@@ -15,7 +15,10 @@ import com.facebook.react.bridge.WritableArray
 import com.facebook.react.bridge.WritableMap
 import java.util.concurrent.atomic.AtomicBoolean
 
-class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
+class ViewHierarchyScanner(
+  private val debounceMs: Long = 400L,
+  private val maxWaitMs: Long = 1500L
+) {
 
   private data class ScanFrame(val originX: Int, val originY: Int, val density: Float)
 
@@ -31,9 +34,11 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
     val resolved = AtomicBoolean(false)
     var listener: ViewTreeObserver.OnGlobalLayoutListener? = null
     var settleRunnable: Runnable? = null
+    var deadlineRunnable: Runnable? = null
 
     fun cleanup() {
       settleRunnable?.let { mainHandler.removeCallbacks(it) }
+      deadlineRunnable?.let { mainHandler.removeCallbacks(it) }
       listener?.let {
         if (decorView.viewTreeObserver.isAlive) {
           decorView.viewTreeObserver.removeOnGlobalLayoutListener(it)
@@ -54,6 +59,8 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
 
     val runnable = Runnable { consolidate() }
     settleRunnable = runnable
+    val deadline = Runnable { consolidate() }
+    deadlineRunnable = deadline
 
     val globalLayoutListener = ViewTreeObserver.OnGlobalLayoutListener {
       mainHandler.removeCallbacks(runnable)
@@ -67,6 +74,7 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
     }
 
     mainHandler.postDelayed(runnable, debounceMs)
+    mainHandler.postDelayed(deadline, maxWaitMs)
   }
 
   private fun resolveFrame(decorView: View): ScanFrame {
@@ -90,6 +98,7 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
 
   private fun walk(view: View, out: WritableArray, frame: ScanFrame) {
     if (view.visibility != View.VISIBLE) return
+    if (testIdOf(view) == OVERLAY_TEST_ID) return
 
     captureNode(view, frame)?.let { out.pushMap(it) }
 
@@ -184,5 +193,6 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
 
   companion object {
     const val HOST_TEST_ID = "cane-sdk-host"
+    const val OVERLAY_TEST_ID = "cane-sdk-overlay"
   }
 }

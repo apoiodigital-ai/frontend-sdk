@@ -6,6 +6,7 @@ import { IdlePromptBubble } from './IdlePromptBubble';
 import { QuestionSheet } from './QuestionSheet';
 import { Spotlight } from './Spotlight';
 import { SafeBoundary } from '../safety/SafeBoundary';
+import { CANE_OVERLAY_TEST_ID } from './testIds';
 
 export function OverlayRoot(): React.JSX.Element | null {
   const state = useSyncExternalStore(
@@ -15,7 +16,12 @@ export function OverlayRoot(): React.JSX.Element | null {
   );
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+    <View
+      style={StyleSheet.absoluteFill}
+      pointerEvents="box-none"
+      testID={CANE_OVERLAY_TEST_ID}
+      collapsable={false}
+    >
       {state.fabVisible ? (
         <SafeBoundary>
           <FloatingActionButton
