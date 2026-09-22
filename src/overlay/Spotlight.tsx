@@ -1,16 +1,22 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  Dimensions,
-  Modal,
+  BackHandler,
   Pressable,
   StyleSheet,
   Vibration,
   View,
+  type LayoutChangeEvent,
 } from 'react-native';
 import Svg, { Defs, Mask, Rect, Circle } from 'react-native-svg';
 import type { AcharRespostaResponse } from '../types';
 import type { ElementBounds } from './types';
 import { Tooltip } from './Tooltip';
+import {
+  computeCutout,
+  computeDismissAreas,
+  computeTooltipPlacement,
+  type OverlayArea,
+} from './spotlightGeometry';
 import { audioPlayer } from '../audio/AudioPlayer';
 import { safeAsync } from '../safety/safeguard';
 import { logger } from '../safety/logger';
@@ -24,7 +30,6 @@ interface Props {
 }
 
 const OVERLAY_OPACITY = 0.6;
-const CUTOUT_PADDING = 10;
 
 export function Spotlight({
   answer,
@@ -33,10 +38,7 @@ export function Spotlight({
   hapticFeedback,
   onDismiss,
 }: Props): React.JSX.Element {
-  const { width: screenW, height: screenH } = useMemo(
-    () => Dimensions.get('window'),
-    []
-  );
+  const [area, setArea] = useState<OverlayArea | null>(null);
   const hasPlayedAudio = useRef(false);
   const hasHapticFired = useRef(false);
 
@@ -59,94 +61,150 @@ export function Spotlight({
       () => audioPlayer.play(answer.mensagem_voz_url),
       'overlay.Spotlight.audioPlayback'
     );
-
     return () => {
       audioPlayer.stop();
     };
   }, [voiceGuidance, answer.mensagem_voz_url]);
 
-  const cutout = bounds
-    ? {
-        x: Math.max(bounds.x - CUTOUT_PADDING, 0),
-        y: Math.max(bounds.y - CUTOUT_PADDING, 0),
-        width: bounds.width + CUTOUT_PADDING * 2,
-        height: bounds.height + CUTOUT_PADDING * 2,
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      () => {
+        onDismiss();
+        return true;
       }
-    : null;
+    );
+    return () => subscription.remove();
+  }, [onDismiss]);
 
-  const tooltipPlacement: 'above' | 'below' =
-    cutout && cutout.y > screenH / 2 ? 'above' : 'below';
+  const handleLayout = (event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    setArea({ width, height });
+  };
 
-  const tooltipTop = cutout
-    ? tooltipPlacement === 'below'
-      ? cutout.y + cutout.height + 16
-      : Math.max(cutout.y - 140, 24)
-    : screenH / 2 - 60;
+  const cutout = computeCutout(bounds);
 
   return (
-    <Modal transparent animationType="fade" visible onRequestClose={onDismiss}>
-      <Pressable
-        style={StyleSheet.absoluteFill}
-        onPress={onDismiss}
-        accessibilityLabel="Fechar ajuda"
-      >
-        <Svg width={screenW} height={screenH} style={StyleSheet.absoluteFill}>
-          <Defs>
-            <Mask
-              id="cane-spotlight-mask"
-              x={0}
-              y={0}
-              width={screenW}
-              height={screenH}
-            >
-              <Rect x={0} y={0} width={screenW} height={screenH} fill="white" />
-              {cutout ? (
-                cutout.width === cutout.height ? (
-                  <Circle
-                    cx={cutout.x + cutout.width / 2}
-                    cy={cutout.y + cutout.height / 2}
-                    r={cutout.width / 2}
-                    fill="black"
-                  />
-                ) : (
+    <View
+      style={StyleSheet.absoluteFill}
+      pointerEvents="box-none"
+      onLayout={handleLayout}
+    >
+      {area ? (
+        <>
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            <Svg width={area.width} height={area.height}>
+              <Defs>
+                <Mask
+                  id="cane-spotlight-mask"
+                  x={0}
+                  y={0}
+                  width={area.width}
+                  height={area.height}
+                >
                   <Rect
-                    x={cutout.x}
-                    y={cutout.y}
-                    width={cutout.width}
-                    height={cutout.height}
-                    rx={16}
-                    ry={16}
-                    fill="black"
+                    x={0}
+                    y={0}
+                    width={area.width}
+                    height={area.height}
+                    fill="white"
                   />
-                )
-              ) : null}
-            </Mask>
-          </Defs>
-          <Rect
-            x={0}
-            y={0}
-            width={screenW}
-            height={screenH}
-            fill={`rgba(0,0,0,${OVERLAY_OPACITY})`}
-            mask="url(#cane-spotlight-mask)"
-          />
-        </Svg>
-      </Pressable>
+                  {cutout ? (
+                    cutout.width === cutout.height ? (
+                      <Circle
+                        cx={cutout.x + cutout.width / 2}
+                        cy={cutout.y + cutout.height / 2}
+                        r={cutout.width / 2}
+                        fill="black"
+                      />
+                    ) : (
+                      <Rect
+                        x={cutout.x}
+                        y={cutout.y}
+                        width={cutout.width}
+                        height={cutout.height}
+                        rx={16}
+                        ry={16}
+                        fill="black"
+                      />
+                    )
+                  ) : null}
+                </Mask>
+              </Defs>
+              <Rect
+                x={0}
+                y={0}
+                width={area.width}
+                height={area.height}
+                fill={`rgba(0,0,0,${OVERLAY_OPACITY})`}
+                mask="url(#cane-spotlight-mask)"
+              />
+            </Svg>
+          </View>
 
-      <View
-        style={[styles.tooltipContainer, { top: tooltipTop }]}
-        pointerEvents="box-none"
+          {computeDismissAreas(area, cutout).map((dismissArea) => (
+            <Pressable
+              key={dismissArea.key}
+              style={[
+                styles.dismissArea,
+                {
+                  left: dismissArea.left,
+                  top: dismissArea.top,
+                  width: dismissArea.width,
+                  height: dismissArea.height,
+                },
+              ]}
+              onPress={onDismiss}
+              accessible={false}
+              importantForAccessibility="no"
+            />
+          ))}
+
+          <SpotlightTooltip
+            area={area}
+            bounds={bounds}
+            message={answer.mensagem_escrita}
+            onDismiss={onDismiss}
+          />
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+function SpotlightTooltip({
+  area,
+  bounds,
+  message,
+  onDismiss,
+}: {
+  area: OverlayArea;
+  bounds: ElementBounds | null;
+  message: string;
+  onDismiss: () => void;
+}): React.JSX.Element {
+  const { placement, top } = computeTooltipPlacement(
+    area,
+    computeCutout(bounds)
+  );
+  return (
+    <View style={[styles.tooltipContainer, { top }]} pointerEvents="box-none">
+      <Pressable
+        onPress={onDismiss}
+        accessibilityRole="button"
+        accessibilityLabel={message}
+        accessibilityHint="Toque para fechar a ajuda"
       >
-        <Tooltip
-          message={answer.mensagem_escrita}
-          placement={tooltipPlacement}
-        />
-      </View>
-    </Modal>
+        <Tooltip message={message} placement={placement} />
+      </Pressable>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  dismissArea: {
+    position: 'absolute',
+  },
   tooltipContainer: {
     position: 'absolute',
     left: 20,

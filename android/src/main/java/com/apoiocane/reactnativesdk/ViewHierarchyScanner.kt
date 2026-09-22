@@ -9,12 +9,15 @@ import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.EditText
 import android.widget.TextView
+import com.facebook.react.R
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableArray
 import com.facebook.react.bridge.WritableMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
+
+  private data class ScanFrame(val originX: Int, val originY: Int, val density: Float)
 
   private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -43,8 +46,7 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
       cleanup()
       val result = Arguments.createArray()
       try {
-        val density = decorView.resources.displayMetrics.density
-        walk(decorView, result, density)
+        walk(decorView, result, resolveFrame(decorView))
       } catch (e: Exception) {
       }
       callback(result)
@@ -67,19 +69,38 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
     mainHandler.postDelayed(runnable, debounceMs)
   }
 
-  private fun walk(view: View, out: WritableArray, density: Float) {
+  private fun resolveFrame(decorView: View): ScanFrame {
+    val origin = IntArray(2)
+    findHostView(decorView)?.getLocationOnScreen(origin)
+    return ScanFrame(origin[0], origin[1], decorView.resources.displayMetrics.density)
+  }
+
+  private fun findHostView(view: View): View? {
+    if (testIdOf(view) == HOST_TEST_ID) return view
+    if (view is ViewGroup) {
+      for (i in 0 until view.childCount) {
+        findHostView(view.getChildAt(i))?.let { return it }
+      }
+    }
+    return null
+  }
+
+  private fun testIdOf(view: View): String? =
+    (view.getTag(R.id.react_test_id) as? String) ?: (view.tag as? String)
+
+  private fun walk(view: View, out: WritableArray, frame: ScanFrame) {
     if (view.visibility != View.VISIBLE) return
 
-    captureNode(view, density)?.let { out.pushMap(it) }
+    captureNode(view, frame)?.let { out.pushMap(it) }
 
     if (view is ViewGroup) {
       for (i in 0 until view.childCount) {
-        walk(view.getChildAt(i), out, density)
+        walk(view.getChildAt(i), out, frame)
       }
     }
   }
 
-  private fun captureNode(view: View, density: Float): WritableMap? {
+  private fun captureNode(view: View, frame: ScanFrame): WritableMap? {
     val width = view.width
     val height = view.height
     if (width <= 0 || height <= 0) return null
@@ -92,10 +113,10 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
     val map = Arguments.createMap()
     map.putString("viewId", resolveViewId(view))
     map.putString("className", view.javaClass.simpleName)
-    map.putDouble("x", pxToDp(locationOnScreen[0], density))
-    map.putDouble("y", pxToDp(locationOnScreen[1], density))
-    map.putDouble("width", pxToDp(width, density))
-    map.putDouble("height", pxToDp(height, density))
+    map.putDouble("x", pxToDp(locationOnScreen[0] - frame.originX, frame.density))
+    map.putDouble("y", pxToDp(locationOnScreen[1] - frame.originY, frame.density))
+    map.putDouble("width", pxToDp(width, frame.density))
+    map.putDouble("height", pxToDp(height, frame.density))
     map.putBoolean("isSecure", isSecure)
     map.putBoolean("isInteractive", isInteractive(view))
     map.putString("text", if (isSecure) "" else extractText(view))
@@ -159,5 +180,9 @@ class ViewHierarchyScanner(private val debounceMs: Long = 400L) {
     if (!contentDescription.isNullOrBlank()) return contentDescription
 
     return ""
+  }
+
+  companion object {
+    const val HOST_TEST_ID = "cane-sdk-host"
   }
 }

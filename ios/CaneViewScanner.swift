@@ -24,8 +24,9 @@ public class CaneViewScanner: NSObject {
         completion([])
         return
       }
+      let reference: UIView = CaneViewScanner.findHostView(in: window) ?? window
       var results: [[String: Any]] = []
-      self.walk(view: window, window: window, into: &results)
+      self.walk(view: window, reference: reference, into: &results)
       completion(results)
     }
     pendingWorkItem = work
@@ -46,31 +47,41 @@ public class CaneViewScanner: NSObject {
     return UIApplication.shared.keyWindow
   }
 
-  private func walk(view: UIView, window: UIWindow, into results: inout [[String: Any]]) {
+  private static let hostTestId = "cane-sdk-host"
+
+  private static func findHostView(in view: UIView) -> UIView? {
+    if view.accessibilityIdentifier == hostTestId { return view }
+    for subview in view.subviews {
+      if let host = findHostView(in: subview) { return host }
+    }
+    return nil
+  }
+
+  private func walk(view: UIView, reference: UIView, into results: inout [[String: Any]]) {
     if view.isHidden || view.alpha <= 0.01 { return }
 
-    if let node = captureNode(view: view, window: window) {
+    if let node = captureNode(view: view, reference: reference) {
       results.append(node)
     }
 
     for subview in view.subviews {
-      walk(view: subview, window: window, into: &results)
+      walk(view: subview, reference: reference, into: &results)
     }
   }
 
-  private func captureNode(view: UIView, window: UIWindow) -> [String: Any]? {
-    let frameInWindow = view.convert(view.bounds, to: window)
-    guard frameInWindow.width > 0, frameInWindow.height > 0 else { return nil }
+  private func captureNode(view: UIView, reference: UIView) -> [String: Any]? {
+    let frameInReference = view.convert(view.bounds, to: reference)
+    guard frameInReference.width > 0, frameInReference.height > 0 else { return nil }
 
     let isSecure = isSecureField(view)
 
     let node: [String: Any] = [
       "viewId": identifier(for: view),
       "className": String(describing: type(of: view)),
-      "x": Double(frameInWindow.origin.x),
-      "y": Double(frameInWindow.origin.y),
-      "width": Double(frameInWindow.width),
-      "height": Double(frameInWindow.height),
+      "x": Double(frameInReference.origin.x),
+      "y": Double(frameInReference.origin.y),
+      "width": Double(frameInReference.width),
+      "height": Double(frameInReference.height),
       "isSecure": isSecure,
       "isInteractive": isInteractive(view),
       "text": isSecure ? "" : extractText(view),

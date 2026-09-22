@@ -84,6 +84,12 @@ class OverlayController {
     this.setState({ screen });
   }
 
+  dismissSpotlight(): void {
+    if (this.state.screen.kind === 'spotlight') {
+      this.hideScreen();
+    }
+  }
+
   hideScreen(): void {
     this.pendingIdleAnswer = null;
     this.pendingQuestionAnswer = null;

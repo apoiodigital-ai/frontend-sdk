@@ -1,6 +1,8 @@
 import React, { useCallback, useRef } from 'react';
 import { StyleSheet, View, type GestureResponderEvent } from 'react-native';
 import { OverlayRoot } from './overlay/OverlayRoot';
+import { overlayController } from './overlay/controller';
+import { CANE_HOST_TEST_ID } from './overlay/testIds';
 import { SafeBoundary } from './safety/SafeBoundary';
 import { caneSDKInternal } from './internal';
 
@@ -18,12 +20,22 @@ export function CaneSDKHost({ children }: Props): React.JSX.Element {
     caneSDKInternal.notifyUserActivity();
   }, []);
 
+  const handleTouchEnd = useCallback(
+    (event: GestureResponderEvent) => {
+      handleActivity(event);
+      overlayController.dismissSpotlight();
+    },
+    [handleActivity]
+  );
+
   return (
     <View
       style={styles.fill}
+      testID={CANE_HOST_TEST_ID}
+      collapsable={false}
       onTouchStart={handleActivity}
       onTouchMove={handleActivity}
-      onTouchEnd={handleActivity}
+      onTouchEnd={handleTouchEnd}
     >
       {children}
       <SafeBoundary>

@@ -51,6 +51,25 @@ describe('overlayController', () => {
     expect(trigger).toHaveBeenCalledTimes(1);
   });
 
+  it('dismissSpotlight() only hides the spotlight screen', () => {
+    overlayController.showLoading();
+    overlayController.dismissSpotlight();
+    expect(overlayController.getState().screen.kind).toBe('loading');
+
+    overlayController.showSpotlight({
+      kind: 'spotlight',
+      answer: {
+        viewID: 'btn',
+        mensagem_escrita: 'Toque aqui',
+        mensagem_voz_url: '',
+        precisao: 1,
+      },
+      bounds: null,
+    });
+    overlayController.dismissSpotlight();
+    expect(overlayController.getState().screen.kind).toBe('hidden');
+  });
+
   it('reset() clears pending answers and hides everything', () => {
     overlayController.showIdlePrompt();
     overlayController.reset();
