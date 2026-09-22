@@ -80,6 +80,6 @@ export interface AcharRespostaRequest {
 export interface AcharRespostaResponse {
   viewID: string;
   mensagem_escrita: string;
-  mensagem_voz_url: string;
+  mensagem_voz_url: string | null;
   precisao: number;
 }

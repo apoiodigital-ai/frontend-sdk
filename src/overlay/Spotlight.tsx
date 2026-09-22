@@ -53,18 +53,19 @@ export function Spotlight({
     }
   }, [hapticFeedback]);
 
+  const audioUrl = answer.mensagem_voz_url;
+
   useEffect(() => {
-    if (!voiceGuidance || hasPlayedAudio.current || !answer.mensagem_voz_url)
-      return;
+    if (!voiceGuidance || hasPlayedAudio.current || !audioUrl) return;
     hasPlayedAudio.current = true;
     safeAsync(
-      () => audioPlayer.play(answer.mensagem_voz_url),
+      () => audioPlayer.play(audioUrl),
       'overlay.Spotlight.audioPlayback'
     );
     return () => {
       audioPlayer.stop();
     };
-  }, [voiceGuidance, answer.mensagem_voz_url]);
+  }, [voiceGuidance, audioUrl]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener(

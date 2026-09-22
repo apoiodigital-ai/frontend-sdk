@@ -106,7 +106,7 @@ describe('CaneSDK assist flow', () => {
       '/resposta/achar-resposta': {
         viewID: 'btn-pagar-boleto',
         mensagem_escrita: 'Toque em Pagar boleto',
-        mensagem_voz_url: '',
+        mensagem_voz_url: null,
         precisao: 0.9,
       },
     };
