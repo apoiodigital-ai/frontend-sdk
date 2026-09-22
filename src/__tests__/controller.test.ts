@@ -44,6 +44,29 @@ describe('overlayController', () => {
     await expect(promise).resolves.toBe('PIX');
   });
 
+  it('hideScreen() releases a pending question with null and a pending idle prompt with false', async () => {
+    const question = overlayController.askQuestion({
+      texto: 'Boleto ou PIX?',
+      opcoes: ['Boleto', 'PIX'],
+    });
+    overlayController.hideScreen();
+    await expect(question).resolves.toBeNull();
+
+    const idlePrompt = overlayController.showIdlePrompt();
+    overlayController.hideScreen();
+    await expect(idlePrompt).resolves.toBe(false);
+  });
+
+  it('cancelQuestion() hides the sheet and resolves the question with null', async () => {
+    const question = overlayController.askQuestion({
+      texto: 'Qual endereço?',
+      opcoes: [],
+    });
+    overlayController.cancelQuestion();
+    await expect(question).resolves.toBeNull();
+    expect(overlayController.getState().screen.kind).toBe('hidden');
+  });
+
   it('manual trigger callback can be registered and invoked by the FAB', () => {
     const trigger = jest.fn();
     overlayController.setManualTrigger(trigger);

@@ -9,7 +9,8 @@ class OverlayController {
   private state: OverlayState = INITIAL_OVERLAY_STATE;
   private listeners = new Set<() => void>();
   private pendingIdleAnswer: ((yes: boolean) => void) | null = null;
-  private pendingQuestionAnswer: ((opcao: string) => void) | null = null;
+  private pendingQuestionAnswer: ((resposta: string | null) => void) | null =
+    null;
   private manualTrigger: (() => void) | null = null;
 
   subscribe = (listener: () => void): (() => void) => {
@@ -65,9 +66,9 @@ class OverlayController {
     resolve?.(yes);
   }
 
-  askQuestion(pergunta: PerguntaOpcoes): Promise<string> {
+  askQuestion(pergunta: PerguntaOpcoes): Promise<string | null> {
     this.setState({ screen: { kind: 'question', pergunta } });
-    return new Promise<string>((resolve) => {
+    return new Promise<string | null>((resolve) => {
       this.pendingQuestionAnswer = resolve;
     });
   }
@@ -76,6 +77,10 @@ class OverlayController {
     const resolve = this.pendingQuestionAnswer;
     this.pendingQuestionAnswer = null;
     resolve?.(opcao);
+  }
+
+  cancelQuestion(): void {
+    this.hideScreen();
   }
 
   showSpotlight(
@@ -91,17 +96,28 @@ class OverlayController {
   }
 
   hideScreen(): void {
-    this.pendingIdleAnswer = null;
-    this.pendingQuestionAnswer = null;
+    const releasePendingAnswers = this.takePendingAnswers();
     this.setState({ screen: { kind: 'hidden' } });
+    releasePendingAnswers();
   }
 
   reset(): void {
-    this.pendingIdleAnswer = null;
-    this.pendingQuestionAnswer = null;
+    const releasePendingAnswers = this.takePendingAnswers();
     this.manualTrigger = null;
     this.state = INITIAL_OVERLAY_STATE;
     this.listeners.forEach((listener) => listener());
+    releasePendingAnswers();
+  }
+
+  private takePendingAnswers(): () => void {
+    const idleAnswer = this.pendingIdleAnswer;
+    const questionAnswer = this.pendingQuestionAnswer;
+    this.pendingIdleAnswer = null;
+    this.pendingQuestionAnswer = null;
+    return () => {
+      idleAnswer?.(false);
+      questionAnswer?.(null);
+    };
   }
 }
 

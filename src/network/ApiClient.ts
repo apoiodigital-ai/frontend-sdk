@@ -11,13 +11,20 @@ export const DEFAULT_BASE_URL = 'https://api.apoiodigital.example';
 
 const REQUEST_TIMEOUT_MS = 10_000;
 
+export type CaneApiErrorKind = 'http' | 'network' | 'timeout' | 'invalid-json';
+
 export class CaneApiError extends Error {
   constructor(
     message: string,
-    public readonly status?: number
+    public readonly status?: number,
+    public readonly kind: CaneApiErrorKind = 'http'
   ) {
     super(message);
     this.name = 'CaneApiError';
+  }
+
+  get isAuthError(): boolean {
+    return this.status === 401 || this.status === 403;
   }
 }
 
@@ -33,26 +40,54 @@ export class ApiClient {
   ): Promise<TResponse> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timeoutError = () =>
+      new CaneApiError(
+        `Request to ${path} timed out after ${REQUEST_TIMEOUT_MS}ms`,
+        undefined,
+        'timeout'
+      );
 
     try {
-      const response = await fetch(`${this.baseUrl}${path}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': this.accessKey,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
+      let response: Response;
+      try {
+        response = await fetch(`${this.baseUrl}${path}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': this.accessKey,
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+      } catch {
+        throw controller.signal.aborted
+          ? timeoutError()
+          : new CaneApiError(
+              `Network failure calling ${path}`,
+              undefined,
+              'network'
+            );
+      }
 
       if (!response.ok) {
         throw new CaneApiError(
           `Backend responded ${response.status} for ${path}`,
-          response.status
+          response.status,
+          'http'
         );
       }
 
-      return (await response.json()) as TResponse;
+      try {
+        return (await response.json()) as TResponse;
+      } catch {
+        throw controller.signal.aborted
+          ? timeoutError()
+          : new CaneApiError(
+              `Backend sent an invalid JSON body for ${path}`,
+              response.status,
+              'invalid-json'
+            );
+      }
     } finally {
       clearTimeout(timeoutId);
     }

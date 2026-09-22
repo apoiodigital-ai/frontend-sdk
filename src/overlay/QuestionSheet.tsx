@@ -15,24 +15,38 @@ import type { PerguntaOpcoes } from '../types';
 interface Props {
   pergunta: PerguntaOpcoes;
   onAnswer: (opcao: string) => void;
+  onCancel: () => void;
 }
 
 export function QuestionSheet({
   pergunta,
   onAnswer,
+  onCancel,
 }: Props): React.JSX.Element {
   const [freeText, setFreeText] = useState('');
   const isOpenQuestion = pergunta.opcoes.length === 0;
   const trimmed = freeText.trim();
 
   return (
-    <Modal transparent animationType="slide" visible onRequestClose={() => {}}>
+    <Modal transparent animationType="slide" visible onRequestClose={onCancel}>
       <KeyboardAvoidingView
         style={styles.backdrop}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.card}>
-          <Text style={styles.question}>{pergunta.texto}</Text>
+          <View style={styles.header}>
+            <Text style={styles.question}>{pergunta.texto}</Text>
+            <Pressable
+              onPress={onCancel}
+              style={styles.closeButton}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Fechar ajuda"
+              testID="cane-question-close"
+            >
+              <Text style={styles.closeText}>Fechar</Text>
+            </Pressable>
+          </View>
           {isOpenQuestion ? (
             <View>
               <TextInput
@@ -101,11 +115,28 @@ const styles = StyleSheet.create({
     padding: 24,
     maxHeight: '70%',
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+    gap: 12,
+  },
   question: {
+    flex: 1,
     fontSize: 21,
     fontWeight: '700',
     color: '#111111',
-    marginBottom: 16,
+  },
+  closeButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: '#EDEDED',
+  },
+  closeText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#333333',
   },
   option: {
     borderWidth: 2,

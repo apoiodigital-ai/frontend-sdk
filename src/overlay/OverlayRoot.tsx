@@ -39,6 +39,7 @@ export function OverlayRoot(): React.JSX.Element | null {
           <QuestionSheet
             pergunta={state.screen.pergunta}
             onAnswer={(opcao) => overlayController.answerQuestion(opcao)}
+            onCancel={() => overlayController.cancelQuestion()}
           />
         ) : null}
       </SafeBoundary>

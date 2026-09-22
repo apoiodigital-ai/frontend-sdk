@@ -3,7 +3,7 @@ import type {
   CapturedElement,
   HeuristicConstants,
 } from './types';
-import { ApiClient, DEFAULT_BASE_URL } from './network/ApiClient';
+import { ApiClient, CaneApiError, DEFAULT_BASE_URL } from './network/ApiClient';
 import { InactivityHeuristic } from './inactivity/InactivityHeuristic';
 import { resolveHeuristicConstants } from './inactivity/constants';
 import { resolveBounds, summarizeScan } from './inactivity/estimator';
@@ -28,7 +28,7 @@ interface ResolvedOptions {
   heuristicConstants: HeuristicConstants;
 }
 
-type Status = 'uninitialized' | 'ready' | 'destroyed';
+type Status = 'uninitialized' | 'ready' | 'suspended' | 'destroyed';
 
 class CaneSDKFacade {
   private status: Status = 'uninitialized';
@@ -91,6 +91,7 @@ class CaneSDKFacade {
 
   registerCriticalScreen({ name }: { name: string }): void {
     safeAsync(async () => {
+      if (this.status === 'suspended') return;
       this.ensureReady('registerCriticalScreen');
       this.criticalScreenName = name;
       logger.info(`Critical screen registered: "${this.criticalScreenName}"`);
@@ -167,85 +168,121 @@ class CaneSDKFacade {
   }
 
   private async startAssist(promptText: string): Promise<void> {
-    if (this.assistInFlight) return;
+    if (this.assistInFlight || this.status !== 'ready') return;
     this.assistInFlight = true;
 
-    await safeAsync(async () => {
-      if (!this.api || !this.userId) {
-        logger.warn(
-          'startAssist() requires both init() and registerUser() to have completed -- hiding overlay.'
-        );
+    try {
+      const spotlightShown = await this.runAssist(promptText);
+      if (!spotlightShown) {
         overlayController.hideScreen();
-        return;
+      }
+    } catch (error) {
+      logger.warn('Assist flow failed -- hiding overlay.', error);
+      safeSync(() => {
+        overlayController.hideScreen();
+        if (error instanceof CaneApiError && error.isAuthError) {
+          this.suspend();
+        }
+      }, 'CaneSDK.startAssist.recover');
+    } finally {
+      this.assistInFlight = false;
+    }
+  }
+
+  private async runAssist(promptText: string): Promise<boolean> {
+    const api = this.api;
+    const userId = this.userId;
+    if (!api || !userId) {
+      logger.warn(
+        'startAssist() requires both init() and registerUser() to have completed -- hiding overlay.'
+      );
+      return false;
+    }
+
+    overlayController.showLoading();
+
+    let elements = this.lastScan?.elements;
+    if (!elements) {
+      elements = await captureViewHierarchy();
+      this.lastScan = { elements, scannedAt: Date.now() };
+    }
+    this.indexElements(elements);
+
+    let response = await api.validarNecessidadeInformacoes({
+      userId,
+      prompt: promptText,
+      elementos: elements,
+    });
+    let idPedido = response.idPedido;
+
+    let loopGuard = 0;
+    while (response.interromper && response.pergunta) {
+      loopGuard += 1;
+      if (loopGuard > MAX_QUESTION_LOOP_ITERATIONS) {
+        logger.warn(
+          'Clarification loop exceeded the safety cap -- hiding overlay.'
+        );
+        return false;
+      }
+      if (!idPedido) {
+        logger.warn(
+          'Backend did not return an "idPedido" to correlate the clarification loop ' +
+            '(see README "Backend contract gap") -- hiding overlay.'
+        );
+        return false;
+      }
+
+      const resposta = await overlayController.askQuestion(response.pergunta);
+      if (resposta === null) {
+        logger.info('Clarification question closed by the user.');
+        return false;
       }
 
       overlayController.showLoading();
-
-      let elements = this.lastScan?.elements;
-      if (!elements) {
-        elements = await captureViewHierarchy();
-        this.lastScan = { elements, scannedAt: Date.now() };
-      }
-      this.indexElements(elements);
-
-      let response = await this.api.validarNecessidadeInformacoes({
-        userId: this.userId,
-        prompt: promptText,
-        elementos: elements,
-      });
-      let idPedido = response.idPedido;
-
-      let loopGuard = 0;
-      while (response.interromper && response.pergunta) {
-        loopGuard += 1;
-        if (loopGuard > MAX_QUESTION_LOOP_ITERATIONS) {
-          logger.warn(
-            'Clarification loop exceeded the safety cap -- hiding overlay.'
-          );
-          overlayController.hideScreen();
-          return;
-        }
-        if (!idPedido) {
-          logger.warn(
-            'Backend did not return an "idPedido" to correlate the clarification loop ' +
-              '(see README "Backend contract gap") -- hiding overlay.'
-          );
-          overlayController.hideScreen();
-          return;
-        }
-
-        const resposta = await overlayController.askQuestion(response.pergunta);
-        response = await this.api.validarRespostaNecessidade({
-          userId: this.userId,
-          idPedido,
-          resposta,
-        });
-        idPedido = response.idPedido ?? idPedido;
-      }
-
-      const found = await this.api.acharResposta({
-        userId: this.userId,
-        prompt: promptText,
-        elementos: elements,
+      response = await api.validarRespostaNecessidade({
+        userId,
         idPedido,
+        resposta,
       });
+      idPedido = response.idPedido ?? idPedido;
+    }
 
-      const bounds = this.elementIndex.get(found.viewID);
-      overlayController.showSpotlight({
-        kind: 'spotlight',
-        answer: found,
-        bounds: bounds
-          ? {
-              x: bounds.x,
-              y: bounds.y,
-              width: bounds.width,
-              height: bounds.height,
-            }
-          : null,
-      });
-    }, 'CaneSDK.startAssist');
+    const found = await api.acharResposta({
+      userId,
+      prompt: promptText,
+      elementos: elements,
+      idPedido,
+    });
 
-    this.assistInFlight = false;
+    if (this.status !== 'ready') return false;
+
+    const bounds = this.elementIndex.get(found.viewID);
+    overlayController.showSpotlight({
+      kind: 'spotlight',
+      answer: found,
+      bounds: bounds
+        ? {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+          }
+        : null,
+    });
+    return true;
+  }
+
+  private suspend(): void {
+    this.status = 'suspended';
+    this.heuristic.disarm();
+    this.criticalScreenName = null;
+    this.lastScan = null;
+    this.elementIndex.clear();
+    overlayController.setFabVisible(false);
+    overlayController.hideScreen();
+    logger.warn(
+      'Access key rejected by the backend -- CaneSDK suspended until the next init().'
+    );
   }
 }
 
