@@ -23,12 +23,10 @@ This SDK instead scans **only the host app's own view hierarchy, from
 inside the host app's own process**, via a native layout-listener
 (`ViewTreeObserver.OnGlobalLayoutListener` on Android, `UIWindow` traversal
 on iOS) -- never an OS-level accessibility service, and never anything
-outside the partner app itself. No special OS permission, no separate app
-install for the end user.
+outside the partner app itself. No runtime OS permission prompt, no separate
+app install for the end user.
 
 ## Public API
-
-The imperative surface is exactly this (do not rename these):
 
 ```ts
 import { CaneSDK } from '@apoiocane/react-native-sdk';
@@ -39,6 +37,10 @@ CaneSDK.init({
     voiceGuidance?: boolean, // default true
     hapticFeedback?: boolean, // default true
     inactivityTimeout?: 'auto' | { min: number, max: number }, // default 'auto'
+    baseUrl?: string,
+    heuristicConstants?: Partial<HeuristicConstants>,
+    logLevel?: 'debug' | 'info' | 'warn' | 'error' | 'silent', // default 'warn' in release, 'debug' in __DEV__
+    onLog?: (entry: CaneLogEntry) => void,
   },
 });
 
@@ -53,10 +55,8 @@ CaneSDK.destroy(); // full teardown
 ### Required host integration: `CaneSDKHost`
 
 React Native has no stable, architecture-version-safe way to inject a
-floating overlay root purely imperatively (the unofficial "root siblings"
-trick relies on `AppRegistry` internals that aren't guaranteed to keep
-working across old/new-architecture RN versions). So the overlay UI needs
-one small, explicit mount point. Wrap your app once, near the root:
+floating overlay root purely imperatively, so the overlay UI needs one
+explicit mount point. Wrap your app once, near the root:
 
 ```tsx
 import { CaneSDKHost } from '@apoiocane/react-native-sdk';
@@ -70,16 +70,15 @@ export default function App() {
 }
 ```
 
-This is additive -- it doesn't rename or replace any of the five methods
-above. It's also where the (privacy-preserving, see below) touch/gesture
-listener for the inactivity heuristic lives. See "Deviations from the spec"
-for why this exists.
+`CaneSDKHost` is also:
+
+- where the touch listener for the inactivity heuristic lives;
+- the coordinate reference for the native scanners: its view carries
+  `testID="cane-sdk-host"`, and every captured element is measured relative
+  to it, so the Spotlight lines up regardless of status bar, notch or
+  edge-to-edge mode.
 
 ## Inactivity heuristic -- privacy design
-
-This is the core, deliberately-designed piece, implemented in
-`src/inactivity/InactivityHeuristic.ts` (the file itself carries the same
-comment, so it survives refactors):
 
 1. `registerCriticalScreen()` runs the native view-hierarchy scanner
    **exactly once, locally on-device**, counting interactive components and
@@ -89,337 +88,258 @@ comment, so it survives refactors):
    ```
    estimatedMs = baseMs + interactiveComponentCount * perComponentMs + textCharCount / readingCharsPerMs
    ```
-   calibrated for elderly reading speed (~130 wpm, deliberately slower than
-   the ~200-250 wpm average adult reading speed), then clamped to
+   calibrated for elderly reading speed (~130 wpm), then clamped to
    `options.inactivityTimeout.min`/`.max` if provided, or to the built-in
    defaults (15000ms / 45000ms) otherwise. All constants are overridable via
    `options.heuristicConstants` -- see `src/inactivity/constants.ts`.
-3. A single JS timer is armed. A touch/gesture listener (living in
-   `CaneSDKHost`) resets that timer on **any** interaction. Nothing is
-   scanned or transmitted while idle -- only a local timer ticks.
+3. A single JS timer is armed. The touch listener in `CaneSDKHost` resets
+   that timer on **any** interaction. Nothing is scanned or transmitted while
+   idle -- only a local timer ticks.
 4. On timeout, a small local prompt appears ("Precisa de uma ajudinha para
    continuar?"). **Only if the user answers affirmatively** does the SDK
    take the already-captured (or freshly re-captured, if none is cached)
-   element tree and send it to the backend to start the real assist flow.
+   element tree and send it to the backend to start the assist flow.
 5. Net effect: **zero screen content leaves the device until explicit
-   user opt-in after the idle prompt.** This is a deliberate, client-agreed
-   architecture decision, not an oversight -- do not "simplify" it into
-   periodic re-scanning or streaming layout changes to a backend.
+   user opt-in.** Do not "simplify" this into periodic re-scanning or
+   streaming layout changes to a backend.
 
-The floating action button (see below) is the second, fully manual trigger
-path for the same assist flow -- tapping it skips the idle-prompt step but
-still only sends data as a direct result of that explicit tap.
+The floating action button is the second, fully manual trigger path for the
+same assist flow -- tapping it skips the idle prompt but still only sends
+data as a direct result of that explicit tap.
 
 ## Backend contract
 
-Base URL is configurable via `options.baseUrl` (falls back to a
-placeholder default -- see `src/network/ApiClient.ts`). Every request
-carries `x-api-key: <accessKey>`. Implemented with plain `fetch` --
-deliberately no axios or other HTTP client, to keep the SDK bundle small.
+Base URL is configurable via `options.baseUrl`. Every request carries
+`x-api-key: <accessKey>` and is implemented with plain `fetch`.
 
 1. `POST /resposta/validar/necessidade-informacoes`
-   Body: `{ userId, prompt, elementos: [...captured tree...] }`
-   Response: `{ interromper: boolean, pergunta?: { texto: string, opcoes: string[] } }`
+   Body: `{ userId, prompt, elementos }`
+   Response: `{ interromper, pergunta: { texto, opcoes } | null, idPedido }`
 2. `POST /resposta/validar/resposta-necessidade`
-   Body: `{ userId, idPedido, resposta: string }`
-   Response: `{ interromper: boolean, ... }` (may loop back to another question, or proceed)
+   Body: `{ userId, idPedido, resposta }`
+   Response: same shape as (1); may loop back to another question.
 3. `POST /resposta/achar-resposta`
-   Body: `{ userId, prompt, elementos: [...] }`
-   Response: `{ viewID: string, mensagem_escrita: string, mensagem_voz_url: string, precisao: number }`
+   Body: `{ userId, prompt, elementos, idPedido }`
+   Response: `{ viewID, mensagem_escrita, mensagem_voz_url: string | null, precisao, idResposta }`
 
-**Backend contract status (alinhado com o repo `backend-sdk` em
-12/09/2026):**
+Contract notes (aligned with the `backend-sdk` repo):
 
-- ~~`idPedido` gap~~ **resolvido**: o backend emite `idPedido` nas
-  respostas de (1) e (2); a leitura defensiva em `src/CaneSDK.ts` continua
-  valendo como fail-safe.
-- ~~Shape de `elementos` divergente~~ **resolvido no backend**: o backend
-  agora desserializa exatamente o shape que este SDK envia
-  (`CapturedElementDTO`, espelho de `CapturedElement`), e o `viewID` da
-  resposta de `achar-resposta` é o mesmo `viewId` string capturado aqui —
-  o lookup no índice local volta a funcionar.
-- ~~Identidade do usuário~~ **resolvido no backend**: `userId` (o hash
-  anônimo do parceiro que `registerUser` repassa) agora é aceito como
-  string e auto-provisionado por tenant na primeira chamada — este SDK
-  continua sem precisar chamar `POST /usuario/registrar`.
-- ~~Loop de follow-up sem opções~~ **resolvido aqui**: o `QuestionSheet`
-  renderiza um campo de texto livre + botão "Enviar resposta" quando
-  `pergunta.opcoes` vem vazio (contrato do backend para resposta aberta).
-- **Timeout** (pendente, menor): `REQUEST_TIMEOUT_MS = 10s` aqui vs.
-  fail-safe de 2s prometido no doc V2 §5.5 (latência típica declarada:
-  650ms P95). Decidir o valor contratual e alinhar.
-- As correções do backend ainda não foram compiladas (sem JDK 17 na
-  máquina de dev) — o contrato acima precisa de um teste de integração
-  real antes do primeiro piloto.
+- **Clarification answers are used**: the SDK sends the `idPedido` of the
+  clarification loop to `achar-resposta`; the backend appends every question
+  and answer to the pedido prompt and uses it to pick the element. When no
+  question was needed, the `idPedido` from (1) is still sent, so each assist
+  creates a single pedido.
+- **`pergunta.opcoes = []`** means a free-text answer; the `QuestionSheet`
+  renders a text field in that case.
+- **`mensagem_voz_url` can be `null`** when speech synthesis fails; the
+  Spotlight then shows only the written message.
+- **`idResposta`** is the parameter of `POST /componentes/comparar`
+  (screen signature check).
+- **Errors**: `401/403` (key rejected) suspends the SDK until the next
+  `init()`; `429` (rate limit, see the backend README) and any other failure
+  just hide the overlay for that attempt.
+- **Timeout (open)**: `REQUEST_TIMEOUT_MS = 10s` in `src/network/ApiClient.ts`,
+  while `achar-resposta` took 8-69 s against the local backend. The backend
+  latency is the real fix; the contractual value still needs to be decided.
 
 ## Native view-hierarchy scanners
 
-Both platforms implement the same contract: walk the host app's own view
-tree, once per call, after a short (300-500ms) layout-settle debounce
-**unrelated to and much shorter than** the inactivity timer above -- this
-debounce only exists to avoid reading mid-animation.
+Both platforms walk the host app's own view tree, once per call, after a
+short layout-settle debounce (400ms) **unrelated to and much shorter than**
+the inactivity timer above.
 
-**`viewId` resolution priority** (same order both platforms, so a partner
-app can reason about it once):
-1. A real native resource id, if present and resolvable (Android
-   `R.id.*` / `getResourceEntryName`; effectively never populated for
-   RN-rendered views).
-2. `contentDescription` (Android) / `accessibilityIdentifier` then
-   `accessibilityLabel` (iOS) -- populated by RN's `accessibilityLabel` /
-   `testID` props respectively. Practical recommendation for partner apps:
-   set `accessibilityLabel` on elements you want to be spotlight-able --
-   it's both a real accessibility improvement and a stable Cane SDK target
-   id "for free."
-3. A synthetic per-instance fallback (stable only within a single scan).
+- **Coordinates** are in dp (Android) / points (iOS), relative to the
+  `CaneSDKHost` view -- the same frame the overlay draws in.
+- **Maximum wait (Android)**: layout events restart the debounce, so the
+  scan is capped at 1500ms; a screen that never stops animating still
+  returns a result.
+- **The SDK's own overlay is skipped (Android)**: the `OverlayRoot` subtree
+  (`testID="cane-sdk-overlay"`: floating button, spinner, Spotlight) is not
+  sent to the backend.
+- **Secure field masking** happens in native code, before anything crosses
+  the bridge: Android checks `EditText`'s password `InputType` variations;
+  iOS checks `UITextField.isSecureTextEntry`. Masked fields always report
+  `text: ""`.
 
-**Secure field masking** happens entirely in native code, before anything
-crosses the bridge: Android checks `EditText`'s `InputType` variation
-(`TYPE_TEXT_VARIATION_PASSWORD`/`WEB_PASSWORD`/`VISIBLE_PASSWORD`,
-`TYPE_NUMBER_VARIATION_PASSWORD`); iOS checks `UITextField.isSecureTextEntry`.
-Masked fields always report `text: ""`.
+**`viewId` resolution** (the two platforms do not use the same sources yet):
+
+| Priority | Android | iOS |
+|---|---|---|
+| 1 | Resource id name (`R.id.*`; practically never set for RN views) | `accessibilityIdentifier` (RN `testID`) |
+| 2 | `contentDescription` (RN `accessibilityLabel`) | `accessibilityLabel` |
+| 3 | `view-<identityHashCode>` | `view-<ObjectIdentifier hash>` |
+
+The fallback in row 3 is a per-instance value: it changes between app
+launches, so it only correlates elements within a single assist. Setting
+`accessibilityLabel` on the elements a partner wants to be spotlight-able
+gives a stable id on both platforms.
+
+Files:
 
 - Android: `android/src/main/java/com/apoiocane/reactnativesdk/ViewHierarchyScanner.kt`
-  (walk logic) + `ReactNativeSdkModule.kt` (TurboModule bridge,
-  `captureViewHierarchy(): Promise<CapturedElementNative[]>`).
-- iOS: `ios/CaneViewScanner.swift` (walk logic, `UIWindow` traversal per the
-  spec's `view.convert(view.bounds, to: window)` approach) +
-  `ios/ReactNativeSdk.mm` (ObjC++ TurboModule glue, imports the
-  Xcode-generated `ReactNativeSdk-Swift.h` umbrella header).
-- Bridged as a single TurboModule (`react-native-codegen`, new architecture)
-  -- this is what `create-react-native-library`/`react-native-builder-bob`
-  scaffolds by default for RN 0.86.2, the version this repo was generated
-  against.
+  + `ReactNativeSdkModule.kt` (TurboModule, `captureViewHierarchy()`).
+- iOS: `ios/CaneViewScanner.swift` + `ios/ReactNativeSdk.mm` (ObjC++ glue).
 
-Every native entry point resolves rather than rejects/throws on failure
-(no current Activity, scan exception, etc. all resolve to `[]`) -- see
-"Fail-safe design."
+Every native entry point resolves rather than rejects on failure (no current
+Activity, scan exception, etc. all resolve to `[]`).
 
 ## Overlay / spotlight UI
 
 Cross-platform React Native/TypeScript, under `src/overlay/`:
 
-- `Spotlight.tsx` -- full-screen `Modal`, ~60%-opacity dark backdrop, with a
-  circular or rounded-rect cutout drawn via an `react-native-svg` mask
-  (`Mask`/`Rect`/`Circle`) positioned exactly over the target element's
-  cached coordinates.
-- `Tooltip.tsx` -- large, high-contrast speech-bubble typography above/below
-  the cutout.
-- `FloatingActionButton.tsx` -- the always-available manual trigger path.
-- `IdlePromptBubble.tsx` / `QuestionSheet.tsx` -- the local idle nudge and
-  the backend clarification-question loop, respectively.
-- `controller.ts` -- a small, dependency-free pub/sub state container
-  connecting `CaneSDK` (the facade) to `OverlayRoot` (what `CaneSDKHost`
-  renders), so neither package needs to import the other directly.
+- `Spotlight.tsx` -- a layer inside `CaneSDKHost` (not a `Modal`) with a
+  ~60%-opacity dark backdrop and a circular or rounded-rect cutout drawn with
+  a `react-native-svg` mask. Only the dark area captures touches (and closes
+  the help); the cutout is empty, so **the tap reaches the partner's
+  highlighted button**, and finishing that tap also closes the Spotlight.
+  Tapping the tooltip or pressing Android back closes it too.
+- `spotlightGeometry.ts` -- cutout, touch areas and tooltip placement (unit
+  tested).
+- `Tooltip.tsx` -- large, high-contrast speech bubble above/below the cutout.
+- `FloatingActionButton.tsx` -- the always-available manual trigger.
+- `IdlePromptBubble.tsx` / `QuestionSheet.tsx` -- the idle nudge and the
+  clarification question. The question sheet has a **Fechar** button and
+  closes on Android back; closing it cancels the assist.
+- `controller.ts` -- a small pub/sub state container connecting `CaneSDK` to
+  `OverlayRoot`. Hiding the overlay releases any pending question (`null`) or
+  idle prompt (`false`), so the assist flow never waits forever.
 
-`options.hapticFeedback` gates a short `Vibration.vibrate()` pulse
-(core React Native API -- deliberately not an extra native haptics
-library, same "keep the bundle small" reasoning as the HTTP client choice)
-on cutout reveal. `options.voiceGuidance` gates auto-playing
-`mensagem_voz_url` through `react-native-sound`.
+`options.hapticFeedback` gates a short `Vibration.vibrate()` pulse when the
+Spotlight appears. The library manifest declares
+`android.permission.VIBRATE` (a normal permission, no user prompt), which the
+manifest merger adds to the host app. `options.voiceGuidance` gates
+auto-playing `mensagem_voz_url` through `react-native-sound`.
 
 ### Peer dependencies
 
 ```
 react-native-svg    (spotlight cutout mask)
-react-native-sound   (mensagem_voz_url playback)
+react-native-sound  (mensagem_voz_url playback)
 ```
 
-Both are declared as **required** peer dependencies, not optional ones.
-An earlier draft of this SDK tried to treat `react-native-sound` as a
-soft/optional dependency (lazy `require` behind a try/catch). That's
-wrong for React Native: Metro resolves `require()`/`import` statically
-when building the bundle, before any of that code runs, so an actually-
-missing peer dependency fails the bundle build regardless of the
-try/catch. The try/catch in `src/audio/AudioPlayer.ts` still guards real
-runtime failures (bad URL, decode error) -- it just can't make the
-dependency optional in the way an earlier comment claimed. Partner apps
-must install both packages (and, per usual RN convention, run
-`pod install` for the iOS native side of `react-native-svg`/
-`react-native-sound`).
-
-`react-native-sound` was chosen over `expo-av`/`expo-audio` because it
-works in a bare RN app without pulling in `expo-modules-core`, a much
-bigger ask for partner apps that aren't already on Expo.
+Both are **required** peer dependencies: Metro resolves `require()`/`import`
+statically, so a missing peer fails the bundle build regardless of any
+try/catch. The try/catch in `src/audio/AudioPlayer.ts` guards runtime
+failures (bad URL, decode error). Partner apps must install both packages
+(and run `pod install` on iOS).
 
 ## Fail-safe design
 
-Hard requirement: scanning, networking, and rendering must never crash or
-visibly break the host app; any failure anywhere should make the SDK
-quietly hide itself and hand full control back to the host. This is
-implemented as two consistent choke points rather than ad hoc try/catch:
+Hard requirement: scanning, networking and rendering must never crash or
+block the host app; any failure makes the SDK hide itself and hand control
+back to the host.
 
-- `src/safety/safeguard.ts` -- `safeAsync`/`safeSync` wrap every
-  async/sync operation (native scan calls, every network request, the
-  heuristic arm/reset/disarm cycle, the whole `startAssist` flow).
-- `src/safety/SafeBoundary.tsx` -- a React error boundary wrapping every
-  piece of overlay UI individually (`OverlayRoot.tsx`), since try/catch
-  cannot intercept exceptions thrown during React's render phase. One
-  broken subtree (e.g. a malformed `pergunta` from the backend) hides
-  itself without taking the FAB or the rest of the host app's UI down
-  with it.
-- Every native bridge method (`ReactNativeSdkModule.kt`,
-  `ReactNativeSdk.mm`) resolves rather than rejects on internal failure.
+- `src/safety/safeguard.ts` -- `safeAsync`/`safeSync` wrap native scan calls,
+  the heuristic cycle and the public methods.
+- The assist flow (`startAssist`) always ends in `finally`: on any failure
+  (network, timeout, HTTP error, invalid JSON -- all surfaced as
+  `CaneApiError` with a `kind`) the overlay is hidden and a new assist can
+  start right away.
+- A `401`/`403` from the backend suspends the SDK (floating button and
+  heuristic off, no further calls) until the next `init()`.
+- `src/safety/SafeBoundary.tsx` -- a React error boundary around every piece
+  of overlay UI, since try/catch cannot intercept render-phase exceptions.
+- Every native bridge method resolves rather than rejects on failure.
+
+## Logging
+
+The SDK logs in release builds too:
+
+- default level `warn` in release and `debug` in `__DEV__`; change it with
+  `options.logLevel` (`'silent'` turns logging off);
+- `warn`/`error` entries go to the console (logcat / os_log);
+- `options.onLog` receives every emitted entry
+  (`{ level, message, timestamp, error? }`) so the partner can forward it to
+  their own crash reporter -- the reliable path, since many apps strip
+  `console` from release builds;
+- errors are reduced to `{ name, message, status?, kind? }`; no other error
+  field and never the access key are logged. Swallowed exceptions and overlay
+  render errors are `error`; expected assist failures are `warn`.
 
 ## Repo structure
 
 ```
 src/                  TypeScript facade + overlay UI
   CaneSDK.ts           public facade singleton
-  CaneSDKHost.tsx       render anchor + activity listener (see "Deviations")
-  internal.ts           tiny indirection to avoid an import cycle between the two above
-  types.ts              shared public types + backend contract types
-  inactivity/           dynamic timeout estimator + timer (privacy-critical, heavily commented)
-  native/                TurboModule wrapper (fail-safe)
-  network/               ApiClient (plain fetch, the 3 backend endpoints)
-  audio/                 audio playback adapter (react-native-sound)
-  overlay/               Spotlight/Tooltip/FAB/IdlePrompt/QuestionSheet + controller
-  safety/                fail-safe wrapper + error boundary + logger
-  __tests__/             jest unit tests (pure-logic pieces; see "Verification status")
-android/                Kotlin native module (ViewHierarchyScanner.kt, ReactNativeSdkModule.kt)
-ios/                    Swift native module (CaneViewScanner.swift) + ObjC++ TurboModule glue
-example/                Runnable example app (mock backend, two screens, full CaneSDK wiring)
+  CaneSDKHost.tsx      render anchor, touch listener, coordinate reference
+  internal.ts          indirection to avoid an import cycle between the two above
+  types.ts             shared public types + backend contract types
+  inactivity/          dynamic timeout estimator + timer
+  native/              TurboModule wrapper (fail-safe)
+  network/             ApiClient (plain fetch, the 3 backend endpoints)
+  audio/               audio playback adapter (react-native-sound)
+  overlay/             Spotlight/Tooltip/FAB/IdlePrompt/QuestionSheet + controller
+  safety/              fail-safe wrappers, error boundary, logger
+  __tests__/           jest unit tests
+android/               Kotlin native module (ViewHierarchyScanner.kt, ReactNativeSdkModule.kt)
+ios/                   Swift native module (CaneViewScanner.swift) + ObjC++ TurboModule glue
+example/               Runnable example app (mock backend, two screens, full CaneSDK wiring)
 ```
 
-## Verification status -- what actually compiles/runs here vs. what doesn't
+## Verification status
 
-This was built and verified in a **Windows environment with no Android
-SDK/emulator and no Xcode/macOS available.** Be precise about what that
-does and doesn't cover:
-
-**Verified in this environment (commands below, all run clean):**
-- `yarn typecheck` (`tsc --noEmit`) -- 0 errors, across `src/`, `example/`,
-  and the test files.
-- `yarn lint` (ESLint + Prettier via `@react-native/eslint-config`) -- 0
-  errors, 0 warnings.
-- `yarn test` (Jest) -- 20 passing unit tests covering the inactivity-
-  heuristic timer (`InactivityHeuristic.test.ts`, using fake timers to
-  assert arm/reset/disarm/one-shot-fire behavior), the timeout-estimation
-  math and clamping (`estimator.test.ts`), and the overlay state machine
-  (`controller.test.ts`).
-- `yarn prepare` (`react-native-builder-bob build`) -- the actual library
-  build: compiles all of `src/` with Babel to `lib/module/*.js` and
-  generates `.d.ts` type definitions to `lib/typescript/*` via `tsc`. This
-  is what actually gets published to npm; it completed with no errors.
-- **Metro bundling of the example app**, for both platforms, e.g.:
-  ```sh
-  cd example
-  npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output /tmp/out.android.bundle
-  npx react-native bundle --platform ios     --dev false --entry-file index.js --bundle-output /tmp/out.ios.bundle
-  ```
-  Both produced a complete (~1MB) JS bundle with no module-resolution
-  errors -- this proves the entire JS dependency graph (including
-  `react-native-svg`, the `react-native-sound` lazy require, and the
-  TurboModule spec import) is valid and would load on a real device. It
-  does **not** prove runtime correctness (no emulator/device was available
-  to actually execute the bundle).
-
-**NOT verified -- blocked by this environment's tooling gaps:**
-- **Android native build.** `ANDROID_HOME`/`JAVA_HOME` are unset, no
-  Android SDK was found anywhere on this machine, and the only JDK present
-  is 1.8 (the project's `android/build.gradle` requires
-  `sourceCompatibility JavaVersion.VERSION_17`). `ViewHierarchyScanner.kt`
-  and `ReactNativeSdkModule.kt` have **not** been compiled by Gradle/Kotlin,
-  and RN's codegen (which generates `NativeReactNativeSdkSpec` from
-  `src/NativeReactNativeSdk.ts`) has never actually run -- so the exact
-  generated Kotlin interface shape (in particular, whether a
-  `Promise<Array<Object>>`-shaped return type codegens exactly as written)
-  is unconfirmed. The Kotlin is written carefully and follows established
-  TurboModule patterns, but treat it as unverified until someone with the
-  Android SDK installed runs `cd example && yarn android` (or at least
-  `cd android && ./gradlew compileDebugKotlin`).
-- **iOS build**, entirely. No Xcode/macOS is available in this environment
-  at all. `ios/CaneViewScanner.swift` and the updated `ios/ReactNativeSdk.mm`
-  /`ReactNativeSdk.podspec` have never been compiled, and the
-  Swift-to-Objective-C++ bridging (the auto-generated
-  `ReactNativeSdk-Swift.h` umbrella header, `s.swift_version`,
-  `DEFINES_MODULE`) is a real, well-established RN/CocoaPods pattern but is
-  **unverified** here. Someone with Xcode needs to run `cd example && npx pod-install && yarn ios`
-  (or open `example/ios/ReactNativeSdkExample.xcworkspace` directly) before
-  this can be trusted.
-- **On-device/emulator runtime behavior** for anything native: the actual
-  layout-listener debounce timing, coordinate conversion correctness, the
-  spotlight cutout rendering against real captured coordinates, haptic
-  feedback, and audio playback have not been exercised end-to-end on a
-  real device.
+- **Unit tests** (`yarn test`): 42 tests -- inactivity heuristic, timeout
+  estimation, overlay controller, Spotlight geometry, logger and the assist
+  flow (`CaneSDK.test.ts`, with the native scanner and `fetch` mocked:
+  clarification `idPedido`, network failure, closing the question,
+  unregistering mid-question, key suspension, `onLog`).
+- **Typecheck and lint** (`yarn typecheck`, `yarn lint`): clean.
+- **CI** (`.github/workflows/ci.yml`, on pushes and pull requests to `main`):
+  lint, test, build-library, build-android and build-ios. The Android and
+  iOS jobs compile the Kotlin and Swift code of the example app.
+- **Not yet verified on a device or emulator**: scanner timing and
+  coordinates, Spotlight alignment and touch pass-through, haptics and audio
+  playback. This needs Android Studio (or a device) and a macOS/Xcode
+  machine.
 
 ## Deviations from the spec (and why)
 
-1. **`CaneSDKHost` component** (additive, not a rename): the spec lists
-   only the five imperative methods. Rendering a floating overlay/FAB
-   purely imperatively has no stable cross-architecture-version solution
-   in React Native, so one small mount point is required. See "Required
-   host integration" above.
-2. **`options.baseUrl`** added to `CaneSDKOptions` (additive): the spec
-   says the base URL is "configurable at init... or via a sensible default
-   + override option" but doesn't specify where that option lives; it's a
-   sibling of `voiceGuidance`/`hapticFeedback`/`inactivityTimeout`.
-3. **`options.heuristicConstants`** added (additive, optional): exposes the
-   base/per-component/reading-speed constants for tuning, since the spec
-   explicitly calls these "sane defaults" that should be
-   "configurable/overridable."
-4. **`react-native-svg` and `react-native-sound` as required (not
-   optional) peer dependencies** -- see "Peer dependencies" above for why
-   a truly-optional soft dependency isn't achievable given Metro's static
-   module resolution.
-5. **Backend `idPedido` handled defensively** -- see "Backend contract
-   gap" above; this is a request for backend-side confirmation, not a
-   unilateral change to the contract.
-6. **Loop safety cap** (`MAX_QUESTION_LOOP_ITERATIONS = 6` in
-   `src/CaneSDK.ts`): the spec describes the clarification loop as
-   open-ended ("may loop back to another question... or proceed"). A hard
-   cap was added so a misbehaving backend can never spin the SDK/overlay
-   forever -- consistent with the fail-safe requirement.
+1. **`CaneSDKHost` component** (additive): rendering a floating overlay
+   purely imperatively has no stable cross-architecture solution in React
+   Native, so one mount point is required.
+2. **`options.baseUrl`**, **`options.heuristicConstants`**,
+   **`options.logLevel`** and **`options.onLog`** (additive, optional).
+3. **`react-native-svg` and `react-native-sound` as required peer
+   dependencies** -- see "Peer dependencies".
+4. **Loop safety cap** (`MAX_QUESTION_LOOP_ITERATIONS = 6` in
+   `src/CaneSDK.ts`): a misbehaving backend can never keep the clarification
+   loop open forever.
 
 Nothing above renames, removes, or changes the signature of `init`,
 `registerUser`, `registerCriticalScreen`, `unregisterCriticalScreen`, or
 `destroy`.
 
-## What's left / blocked
+## What's left
 
-- Real Android and iOS builds (see "Verification status") -- needs the
-  Android SDK + JDK 17 and a macOS/Xcode machine respectively.
-- On-device QA of the native scanners (coordinate accuracy, debounce
-  feel, secure-field masking against real system keyboards).
-- ~~Backend team confirmation of the `idPedido` gap~~ resolved -- and the
-  former blockers (`elementos` shape, user identity, empty `opcoes`) are
-  now aligned too; see "Backend contract status" above. What remains is
-  an end-to-end integration test against a running backend.
-- **Hybrid capture engine for Jetpack Compose / SwiftUI**: both scanners
-  walk the raw view tree only. On a Compose screen (`ComposeView`) or a
-  SwiftUI host (`UIHostingController`) that walk returns almost nothing
-  usable -- those engines only publish structure through the
-  semantics/accessibility tree. Planned direction (decisao registrada em
-  conversa de arquitetura, set/2026): keep the view-tree walk as primary
-  and switch to the in-process accessibility tree
-  (`View.createAccessibilityNodeInfo()` / `accessibilityElements`) for
-  those subtrees -- this is NOT the OS-level AccessibilityService the
-  project abandoned; it needs no permission and reads only the host app.
-  Fail-safe already covers the interim: an empty scan means no overlay.
-  PoC should cover all 4 quadrants (Android View, Compose, UIKit, SwiftUI).
-- **Element-tree pruning before upload**: today every visible node is
-  sent; dropping decorative/non-interactive nodes before serialization
-  would cut input tokens on every one of the backend's agent calls
-  (multiplicative saving -- flagged in the cost review).
-- No free-text input for "what do you need help with" -- both trigger
-  paths (idle-timeout opt-in and the FAB) currently send a fixed generic
-  prompt string (see `DEFAULT_IDLE_PROMPT`/`DEFAULT_MANUAL_PROMPT` in
-  `src/CaneSDK.ts`); a richer input (typed or voice-to-text) was out of
-  scope for this build but would slot in as an additional argument to the
-  same `startAssist` internal method.
-- `example/ios` and `example/android` are the stock
-  `create-react-native-library` scaffolding (RN 0.86.2, new architecture)
-  and have not been hand-verified beyond what's listed above.
+- On-device QA of the native scanners and the Spotlight (see "Verification
+  status").
+- **Fresh screen reads**: the assist flow reuses the scan taken by
+  `registerCriticalScreen()` when there is one, which can be stale if the
+  screen changed (async data, React Navigation keeps previous screens
+  mounted).
+- **Stable `viewId`s**: the per-instance fallback breaks the backend's screen
+  signature between launches, and Android ignores `testID`.
+- **Hybrid capture for Jetpack Compose / SwiftUI**: both scanners walk the
+  raw view tree only; Compose and SwiftUI publish structure through the
+  in-process accessibility tree (`createAccessibilityNodeInfo()` /
+  `accessibilityElements`), which the scanner does not read yet. This is not
+  the OS-level AccessibilityService the project abandoned. WebViews have the
+  same limitation.
+- **Element-tree pruning before upload**: every visible node is sent today;
+  dropping decorative nodes would cut input tokens on every agent call.
+- **User intent**: both trigger paths send a fixed generic prompt; a typed or
+  voice question would slot in as an argument of `startAssist`.
 
 ## Development
 
 ```sh
-yarn install       # installs the workspace (root + example)
-yarn typecheck      # tsc --noEmit
-yarn lint           # eslint + prettier
-yarn test           # jest unit tests
-yarn prepare        # react-native-builder-bob build -> lib/module, lib/typescript
-yarn example android  # requires a configured Android SDK (not available in this environment)
-yarn example ios      # requires Xcode/macOS (not available in this environment)
+yarn install
+yarn typecheck
+yarn lint
+yarn test
+yarn prepare          # react-native-builder-bob build -> lib/module, lib/typescript
+yarn example android  # requires a configured Android SDK
+yarn example ios      # requires Xcode/macOS
 ```
 
 ## License

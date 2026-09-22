@@ -233,7 +233,7 @@ class CaneSDKFacade {
       if (!idPedido) {
         logger.warn(
           'Backend did not return an "idPedido" to correlate the clarification loop ' +
-            '(see README "Backend contract gap") -- hiding overlay.'
+            '(see README "Backend contract") -- hiding overlay.'
         );
         return false;
       }
